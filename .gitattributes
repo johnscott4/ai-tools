@@ -1,0 +1,7 @@
+# Shell scripts and provisioning templates MUST be LF: CRLF breaks them on Linux.
+* text=auto eol=lf
+*.sh          text eol=lf
+*.template    text eol=lf
+*.md          text eol=lf
+# PowerShell stays CRLF (native Windows tooling)
+*.ps1         text eol=crlf

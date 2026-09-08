@@ -1,0 +1,181 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# Raspberry Pi OS headless first-boot provisioning template
+#
+# HOW THIS RUNS
+#   cmdline.txt must contain (single line, appended):
+#     systemd.run=/boot/firstrun.sh systemd.run_success_action=reboot systemd.unit=kernel-command-line.target
+#   Use the LITERAL /boot/ path. An initramfs fixup in the image greps for
+#   exactly 'systemd.run=/boot/firstrun.sh', rewrites /boot/ -> /boot/firmware/,
+#   TRUNCATES this file at the first line matching /rm.*firstrun\.sh$/, appends
+#   its own cleanup, then reboots.
+#
+#   => The LAST line of this file MUST be the removal command at the very
+#      bottom of this script, and nothing may follow it. Critically, NO EARLIER
+#      LINE may match that regex either - even a comment ending in the script's
+#      own name will truncate everything after it, and provisioning then does
+#      nothing at all, silently.
+#      Do not put anything after it. Do not use that pattern earlier in the file.
+#
+# REPLACE EVERY {{PLACEHOLDER}} BELOW BEFORE USE.
+# Generate the password hash with:  openssl passwd -6 'yourpassword'
+# ---------------------------------------------------------------------------
+
+# Never abort on error: a partial config that still yields network access beats
+# a Pi that drops off entirely. Every step is independently guarded.
+set +e
+
+exec >>/var/log/firstrun-provision.log 2>&1
+echo "=== firstrun starting $(date) ==="
+
+# ------------------------------------------------------------------ settings
+HOSTNAME_NEW='{{HOSTNAME}}'
+USERNAME='{{USERNAME}}'
+PASSWORD_HASH='{{PASSWORD_HASH}}'      # openssl passwd -6 'yourpassword'
+SSH_PUBKEY='{{SSH_PUBKEY}}'            # contents of your id_*.pub
+WIFI_SSID='{{WIFI_SSID}}'              # EXACT case as broadcast - verify on air
+WIFI_PASSPHRASE='{{WIFI_PASSPHRASE}}'  # plaintext passphrase, NOT a PSK hex
+WIFI_COUNTRY='{{WIFI_COUNTRY}}'        # e.g. AU, GB, US
+TIMEZONE='{{TIMEZONE}}'                # e.g. Australia/Brisbane
+KEYMAP='{{KEYMAP}}'                    # e.g. us, gb
+
+FWLOC=/boot/firmware
+if [ -x /usr/lib/raspberrypi-sys-mods/get_fw_loc ]; then
+   _L=$(/usr/lib/raspberrypi-sys-mods/get_fw_loc)
+   [ -n "$_L" ] && FWLOC="$_L"
+fi
+echo "firmware location: $FWLOC"
+
+# ----------------------------------------------------------------- hostname
+CURRENT_HOSTNAME=$(cat /etc/hostname | tr -d " \t\n\r")
+if [ -x /usr/lib/raspberrypi-sys-mods/imager_custom ]; then
+   /usr/lib/raspberrypi-sys-mods/imager_custom set_hostname "$HOSTNAME_NEW"
+else
+   echo "$HOSTNAME_NEW" >/etc/hostname
+   sed -i "s/127.0.1.1.*$CURRENT_HOSTNAME/127.0.1.1\t$HOSTNAME_NEW/g" /etc/hosts
+fi
+echo "hostname done -> $(cat /etc/hostname)"
+
+# --------------------------------------------------------------------- user
+# Trixie images ship with NO uid-1000 user. If this step fails the Pi boots
+# into the interactive userconfig.service wizard, which is fatal when headless.
+if [ -x /usr/lib/userconf-pi/userconf ]; then
+   /usr/lib/userconf-pi/userconf "$USERNAME" "$PASSWORD_HASH"
+else
+   FIRSTUSER=$(getent passwd 1000 | cut -d: -f1)
+   if [ -z "$FIRSTUSER" ]; then
+      useradd -m -s /bin/bash "$USERNAME"
+      FIRSTUSER="$USERNAME"
+   fi
+   echo "$FIRSTUSER:$PASSWORD_HASH" | chpasswd -e
+   if [ "$FIRSTUSER" != "$USERNAME" ]; then
+      usermod  -l "$USERNAME" "$FIRSTUSER"
+      usermod  -m -d "/home/$USERNAME" "$USERNAME"
+      groupmod -n "$USERNAME" "$FIRSTUSER"
+      for f in /etc/subuid /etc/subgid /etc/sudoers.d/010_pi-nopasswd; do
+         [ -f "$f" ] && sed -i "s/^$FIRSTUSER/$USERNAME/" "$f"
+      done
+   fi
+fi
+echo "$USERNAME ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/010_${USERNAME}-nopasswd"
+chmod 440 "/etc/sudoers.d/010_${USERNAME}-nopasswd"
+echo "user done: $(getent passwd "$USERNAME")"
+
+# ---------------------------------------------------------------------- ssh
+install -o "$USERNAME" -g "$USERNAME" -m 700 -d "/home/$USERNAME/.ssh"
+printf '%s\n' "$SSH_PUBKEY" > "/home/$USERNAME/.ssh/authorized_keys"
+chown "$USERNAME:$USERNAME" "/home/$USERNAME/.ssh/authorized_keys"
+chmod 600 "/home/$USERNAME/.ssh/authorized_keys"
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/50-provision.conf <<'SSHEOF'
+PasswordAuthentication yes
+PubkeyAuthentication yes
+SSHEOF
+rm -f /etc/ssh/sshd_not_to_be_run
+systemctl enable ssh
+systemctl start ssh
+echo "ssh done"
+
+# --------------------------------------------------------------------- wifi
+# Ethernet needs no config (DHCP). Wi-Fi is the fallback path.
+#
+# LESSON: imager_custom set_wlan takes POSITIONAL args:
+#     set_wlan [-h|--hidden] [-p|--plain] SSID [PASS [COUNTRY]]
+# Passing '-c AU' prints usage and SILENTLY DOES NOTHING. Because that call sat
+# inside an `if`, the else-branch fallback never ran and Wi-Fi was left
+# unconfigured with no error surfaced. ALWAYS check the exit status.
+#
+# LESSON: give the PLAINTEXT PASSPHRASE, not a precomputed PSK hex. The PSK is
+# derived from the SSID, so a precomputed PSK is silently wrong if the SSID case
+# is off by even one character.
+WIFI_OK=0
+if [ -n "$WIFI_SSID" ] && [ -x /usr/lib/raspberrypi-sys-mods/imager_custom ]; then
+   if /usr/lib/raspberrypi-sys-mods/imager_custom set_wlan --plain \
+        "$WIFI_SSID" "$WIFI_PASSPHRASE" "$WIFI_COUNTRY"; then
+      WIFI_OK=1
+      echo "wifi configured via imager_custom"
+   else
+      echo "WARN: imager_custom set_wlan failed (rc=$?) - using NetworkManager fallback"
+   fi
+fi
+if [ -n "$WIFI_SSID" ] && [ "$WIFI_OK" -ne 1 ]; then
+   mkdir -p /etc/NetworkManager/system-connections
+   cat > /etc/NetworkManager/system-connections/preconfigured.nmconnection <<NMEOF
+[connection]
+id=preconfigured
+type=wifi
+autoconnect=true
+
+[wifi]
+mode=infrastructure
+ssid=$WIFI_SSID
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=$WIFI_PASSPHRASE
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+NMEOF
+   chmod 600 /etc/NetworkManager/system-connections/preconfigured.nmconnection
+   echo "wifi configured via NetworkManager profile"
+fi
+if [ -n "$WIFI_COUNTRY" ] && [ -x /usr/bin/raspi-config ]; then
+   raspi-config nonint do_wifi_country "$WIFI_COUNTRY"
+fi
+for f in /var/lib/systemd/rfkill/*wlan*; do [ -e "$f" ] && echo 0 > "$f"; done
+rfkill unblock wifi 2>/dev/null
+echo "wifi done"
+
+# ------------------------------------------------------------------- locale
+if [ -x /usr/lib/raspberrypi-sys-mods/imager_custom ]; then
+   /usr/lib/raspberrypi-sys-mods/imager_custom set_keymap   "$KEYMAP"
+   /usr/lib/raspberrypi-sys-mods/imager_custom set_timezone "$TIMEZONE"
+else
+   rm -f /etc/localtime
+   echo "$TIMEZONE" >/etc/timezone
+   dpkg-reconfigure -f noninteractive tzdata
+fi
+echo "locale done"
+
+# ---------------------------------------------------- optional: I2C / 1-Wire
+# Delete this block if the target has no I2C or 1-Wire peripherals.
+if [ -x /usr/bin/raspi-config ]; then
+   raspi-config nonint do_i2c 0        # 0 = ENABLE (counter-intuitive)
+   raspi-config nonint do_onewire 0
+fi
+CFG="$FWLOC/config.txt"
+if [ -f "$CFG" ]; then
+   grep -q '^dtparam=i2c_arm=on'       "$CFG" || echo 'dtparam=i2c_arm=on'              >> "$CFG"
+   # Long/daisy-chained I2C runs: 100 kHz is far more reliable than the 400 kHz default.
+   grep -q '^dtparam=i2c_arm_baudrate' "$CFG" || echo 'dtparam=i2c_arm_baudrate=100000' >> "$CFG"
+   grep -q '^dtoverlay=w1-gpio'        "$CFG" || echo 'dtoverlay=w1-gpio,gpiopin=4,pullup=on' >> "$CFG"
+fi
+grep -q '^i2c-dev' /etc/modules || echo 'i2c-dev' >> /etc/modules
+echo "hardware config done"
+
+echo "=== firstrun finished $(date) ==="
+rm -f /boot/firstrun.sh
