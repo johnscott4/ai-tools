@@ -7,6 +7,10 @@ Written for an AI agent to follow start to finish. Every claim below was
 verified empirically during a session that took roughly an hour and burned three
 failed cards. Follow it and it takes about ten minutes.
 
+> **Verified again 2026-10-02** for a **Raspberry Pi 5** with the 2026-09-15 Trixie
+> Lite arm64 image: the same image serves Pi 4 and Pi 5, the initramfs fixup is
+> byte-identical, `set_wlan` is still positional, `custom.toml` still absent.
+
 ---
 
 ## Read these two things first

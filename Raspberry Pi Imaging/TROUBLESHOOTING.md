@@ -152,6 +152,18 @@ rpi-imager.exe --cli --debug --log-file C:\tmp\imager.log --first-run-script f.s
 CLI is not viable for automation on Windows, and it has no flag to apply the saved
 OS-customisation profile anyway.
 
+### Elevated `write_card.ps1` exits 1 instantly, no log, nothing written
+
+**Cause.** Launching it with `Start-Process powershell -Verb RunAs -ArgumentList "-File `"...\AI Tools\...\write_card.ps1`" ..."`:
+the quoting of a path containing a space does not survive the elevation hop, and
+the elevated window closes before anything can be read (2026-10-02).
+
+**Fix.** Put a small wrapper `.ps1` in a space-free directory that calls
+`& 'C:\...\write_card.ps1' -ImagePath ... -DiskNumber N -LogPath ... -Confirm:$false`
+inside `Start-Transcript`, and elevate the wrapper with an argument **array**:
+`Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"`"$wrapper`"")`.
+The transcript gives you the full log afterwards.
+
 ### `Could not find file 'C:\PhysicalDrive1'`
 
 **Cause.** A literal `\\.\` string lost a backslash passing through a shell or
