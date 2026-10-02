@@ -16,10 +16,20 @@ sudo apt-get update -qq
 # The Raspberry Pi desktop, X11 flavour. xrdp needs an X11 session: the default
 # Trixie desktop is Wayland (labwc), which xrdp cannot drive.
 log "desktop + xrdp (several hundred packages on Lite)"
-sudo apt-get install -y -q --no-install-recommends \
+# NOT --no-install-recommends: the desktop is configured for the PiXtrix theme,
+# but pixtrix-icons/pixtrix-theme/gtk2-engines-pixflat/xsettingsd are only
+# Recommends. Without them Openbox logs "Unable to load the theme 'PiXtrix'",
+# falls back to Clearlooks, and every panel/desktop icon renders wrong
+# (hit on the Pi 5, 2026-10-02). They are also named explicitly so a future
+# change of Recommends cannot silently drop them again.
+sudo apt-get install -y -q \
   rpd-x-core rpd-x-extras rpd-theme rpd-preferences rpd-wallpaper-trixie rpd-common \
+  pixtrix-icons pixtrix-theme gtk2-engines-pixflat gtk2-engines-pixbuf xsettingsd \
+  adwaita-icon-theme-legacy gnome-themes-extra-data \
+  fonts-dejavu-extra fonts-liberation2 xfonts-base xfonts-scalable xfonts-75dpi xfonts-100dpi \
   lxsession lxsession-logout xrdp xorgxrdp >/tmp/apt-rdp.log 2>&1 \
   || { tail -30 /tmp/apt-rdp.log; exit 1; }
+# Never add 'pcmanfm' to this list: it conflicts with pcmanfm-pi (rpd-x-core).
 
 # The session xrdp starts for this user: force X11 and launch the Pi desktop.
 log "~/.xsession -> startx-rpd (X11)"
@@ -53,4 +63,7 @@ sudo systemctl enable --now xrdp xrdp-sesman
 log "status"
 systemctl is-active xrdp xrdp-sesman
 sudo ss -ltnp | grep ':3389' || { echo "xrdp is NOT listening on 3389"; exit 1; }
+for p in pixtrix-icons pixtrix-theme xsettingsd; do
+  dpkg -s "$p" >/dev/null 2>&1 || { echo "MISSING $p - icons will render wrong"; exit 1; }
+done
 log "DONE - connect with: mstsc /v:$(hostname).local  (user $USER)"

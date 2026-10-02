@@ -20,6 +20,7 @@ port 3389 is listening.
 | Piece | Why |
 |---|---|
 | `rpd-x-core rpd-x-extras rpd-theme rpd-preferences rpd-wallpaper-trixie` | The Raspberry Pi desktop, **X11** flavour. The default Trixie desktop is Wayland (labwc); **xrdp cannot drive Wayland**. |
+| `pixtrix-icons pixtrix-theme gtk2-engines-pixflat xsettingsd` + fonts, **with Recommends** | The desktop is configured for the PiXtrix theme, but these are only *Recommends*. Install with `--no-install-recommends` and Openbox logs "Unable to load the theme 'PiXtrix'", falls back to Clearlooks, and **every icon in the top-left panel and on the desktop renders wrong**. |
 | `xrdp xorgxrdp` | RDP server + the Xorg backend it renders into. |
 | `~/.xsession` → `XDG_SESSION_TYPE=x11`, `GDK_BACKEND=x11`, `exec startx-rpd` | The session xrdp launches for that user. Without it you get a black screen or an immediate disconnect. Per user: repeat for each account that should log in over RDP. |
 | `adduser xrdp ssl-cert` | xrdp reads its TLS key from `/etc/ssl/private`. |
@@ -36,10 +37,41 @@ DISPLAY=:55 timeout 60 xfreerdp3 /v:<ip> /u:<user> /p:<password> /cert:ignore /s
 sleep 30; DISPLAY=:55 import -window root /mnt/c/Users/<you>/rdp.png
 ```
 
-Look at the PNG. Expect the Pi desktop with its panel. WSL in NAT mode reaches
-the LAN by IP; `.local` names may not resolve inside WSL, so use the IP.
+Look at the PNG. Expect the Pi desktop with the **raspberry menu, file-manager
+and terminal icons top-left and Wi-Fi/Bluetooth/clock top-right**. Blank or
+generic icons there = the PiXtrix theme is missing (see above). WSL in NAT mode
+reaches the LAN by IP; `.local` names may not resolve inside WSL, so use the IP.
+
+**Then end the test session** — otherwise the owner's first real login
+*reattaches to it* (at the test client's 1280×800, resized on the fly):
+
+```bash
+ssh user@host 'sudo pkill -x lxsession; sudo pkill -x Xorg'
+```
+
+Also grep the session log for theme failures:
+`grep -iE "unable to load the theme|not present in theme" ~/.cache/lxsession/rpd-x/run.log`
+— expect nothing.
 
 ## Gotchas
+
+- **"I reconnected and got a login screen."** That is xrdp's own login page,
+  shown whenever the RDP client does not send credentials that work on *this*
+  Pi. It is not a broken session: log in there and xrdp **reattaches the
+  existing session** (sesman log: `++ reconnected session`). The usual cause
+  is the client reusing credentials saved for a *different* Pi — on
+  2026-10-02 `mstsc` sent user `joan` (from `logger.local`) to `logger2`,
+  where no such user exists (`Can't get UID for user joan`). Fix on the
+  Windows client, once per host:
+
+  ```bat
+  cmdkey /generic:TERMSRV/logger2.local /user:pi /pass:<password>
+  ```
+
+  or save a per-host `.rdp` file containing `full address:s:logger2.local`
+  and `username:s:pi`, and tick "Remember me" on first connect. Diagnose with
+  `sudo tail -40 /var/log/xrdp-sesman.log` on the Pi: it names the user the
+  client actually sent.
 
 - **Default password warning.** With user `pi` and its default password the
   desktop shows "SSH is enabled and the default password … has not been
