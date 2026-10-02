@@ -70,8 +70,26 @@ Also grep the session log for theme failures:
 
   or save a per-host `.rdp` file containing `full address:s:logger2.local`
   and `username:s:pi`, and tick "Remember me" on first connect. Diagnose with
-  `sudo tail -40 /var/log/xrdp-sesman.log` on the Pi: it names the user the
-  client actually sent.
+  `sudo grep "Performing login" /var/log/xrdp.log` on the Pi: it names the
+  user the client actually sent.
+
+  **What the owner wants instead — and what was done:** make every Pi accept
+  the one user the client already sends, so RDP goes straight to the desktop
+  with no client change. Create that user on the new Pi with the *same
+  password* by copying the hash from a Pi that already has it (the plaintext
+  is never seen):
+
+  ```bash
+  ssh joan@logger.local 'sudo getent shadow joan | cut -d: -f2' |
+    ssh pi@newpi.local 'read -r H; sudo useradd -m -s /bin/bash joan;
+      printf "%s\n" "joan:$H" | sudo chpasswd -e;
+      sudo usermod -aG adm,dialout,sudo,audio,video,plugdev,users,input,render,netdev,spi,i2c,gpio joan;
+      echo "joan ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/010_joan-nopasswd;
+      sudo install -o joan -g joan -m 775 ~/.xsession /home/joan/.xsession'
+  ```
+
+  Better still: **image new Pis with that username from the start**
+  (`USERNAME` in `firstrun.sh`), then this never comes up.
 
 - **Default password warning.** With user `pi` and its default password the
   desktop shows "SSH is enabled and the default password … has not been
