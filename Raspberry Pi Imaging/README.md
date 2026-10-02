@@ -11,6 +11,18 @@ failed cards. Follow it and it takes about ten minutes.
 > Lite arm64 image: the same image serves Pi 4 and Pi 5, the initramfs fixup is
 > byte-identical, `set_wlan` is still positional, `custom.toml` still absent.
 
+> **House rules for this lab (2026-10-02), so a new Pi behaves like the others:**
+> - **Username `joan`** in `firstrun.sh`, with the *same password* as the other
+>   Pis. The owner's RDP client sends `joan` + a saved password to every host;
+>   any other user lands on xrdp's login screen instead of the desktop. If the
+>   password is not to hand, image with any user and copy joan's hash over
+>   afterwards (`../Raspberry Pi RDP/README.md`).
+> - **A unique hostname** (`logger2`, `logger3`, …), never the default
+>   `raspberrypi`: a generic name collides with other Pis on mDNS and with
+>   stale SSH host keys (see below). Confirm the name with the owner before
+>   writing the card; "defaults" is ambiguous.
+> - Then run `../Raspberry Pi RDP/setup_rdp.sh` for remote desktop.
+
 ---
 
 ## Read these two things first

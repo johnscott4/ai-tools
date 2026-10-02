@@ -134,6 +134,21 @@ wifi done                      <-- "done" is a lie
 
 ---
 
+### `Host key verification failed` connecting to a freshly imaged Pi
+
+**Cause.** `known_hosts` still holds the key of an *earlier* Pi with the same
+name (every re-image, or any other Pi called `raspberrypi`, generates a new
+host key). SSH correctly refuses. Seen 2026-10-02.
+
+**Fix.** Confirm the new host by IP first (`ssh pi@<ip> hostname`), then:
+
+```bash
+ssh-keygen -R <name>.local -f /c/Users/w/.ssh/known_hosts
+ssh-keyscan -t ed25519 <ip> | sed 's/^<ip>/<name>.local/' >> /c/Users/w/.ssh/known_hosts
+```
+
+Repeat after renaming a Pi. Unique hostnames per Pi avoid most of this.
+
 ## Windows / tooling symptoms
 
 ### `rpi-imager --cli` exits 1 immediately with no output
