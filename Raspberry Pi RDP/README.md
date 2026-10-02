@@ -91,6 +91,9 @@ Also grep the session log for theme failures:
   Better still: **image new Pis with that username from the start**
   (`USERNAME` in `firstrun.sh`), then this never comes up.
 
+  Confirmed by the owner 2026-10-02: after adding `joan` to logger2, RDP went
+  straight to the desktop with no client change.
+
 - **Default password warning.** With user `pi` and its default password the
   desktop shows "SSH is enabled and the default password … has not been
   changed" on each login. Correct, not a fault: change the password (`passwd`).
